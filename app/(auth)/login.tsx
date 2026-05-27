@@ -31,6 +31,9 @@ export default function LoginScreen() {
     try {
       const res = await authService.login(email, password);
       await setAuth(res.access_token, { id: res.user_id, email: res.email });
+      // Limpiar cache viejo para que todo se refetch con el token nuevo
+      const { queryClient } = await import('@/app/_layout');
+      queryClient.clear();
       router.replace("/(tabs)");
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "No se pudo iniciar sesión");

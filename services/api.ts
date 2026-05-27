@@ -1,12 +1,12 @@
 /**
  * Cliente HTTP base para BodegaApp.
- * Lee el token de authStore y lo agrega automáticamente a cada request.
+ * - Agrega el token automáticamente a cada request
+ * - Si recibe 401, limpia la sesión y redirige a login
  */
 
+import { router } from 'expo-router';
 import { BASE_URL, REQUEST_TIMEOUT } from '@/constants/config';
 import { IApiResponse } from '@/types';
-
-// Importamos el store directamente (no como hook) para usarlo fuera de componentes
 import { useAuthStore } from '@/store/authStore';
 
 class ApiClient {
@@ -20,21 +20,23 @@ class ApiClient {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-
-    // Leer token del store (acceso directo, no hook)
     const token = useAuthStore.getState().token;
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-
     return headers;
   }
 
-  async request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-  ): Promise<T> {
+  private async handleUnauthorized() {
+    // Limpia sesión y redirige a login
+    await useAuthStore.getState().logout();
+    // Limpia cache de queries para evitar datos viejos
+    const { queryClient } = await import('@/app/_layout');
+    queryClient.clear();
+    router.replace('/(auth)/login');
+  }
+
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
@@ -46,11 +48,16 @@ class ApiClient {
         signal: controller.signal,
       });
 
+      // Token expirado o inválido → limpiar sesión
+      if (response.status === 401) {
+        await this.handleUnauthorized();
+        throw new Error('Sesión expirada. Por favor inicia sesión de nuevo.');
+      }
+
       const json: IApiResponse<T> = await response.json();
 
       if (!response.ok || json.error) {
-        const msg = json.error?.message ?? `Error ${response.status}`;
-        throw new Error(msg);
+        throw new Error(json.error?.message ?? `Error ${response.status}`);
       }
 
       return json.data as T;
@@ -59,25 +66,11 @@ class ApiClient {
     }
   }
 
-  get<T>(path: string) {
-    return this.request<T>('GET', path);
-  }
-
-  post<T>(path: string, body: unknown) {
-    return this.request<T>('POST', path, body);
-  }
-
-  put<T>(path: string, body: unknown) {
-    return this.request<T>('PUT', path, body);
-  }
-
-  patch<T>(path: string, body?: unknown) {
-    return this.request<T>('PATCH', path, body);
-  }
-
-  delete<T>(path: string) {
-    return this.request<T>('DELETE', path);
-  }
+  get<T>(path: string) { return this.request<T>('GET', path); }
+  post<T>(path: string, body: unknown) { return this.request<T>('POST', path, body); }
+  put<T>(path: string, body: unknown) { return this.request<T>('PUT', path, body); }
+  patch<T>(path: string, body?: unknown) { return this.request<T>('PATCH', path, body); }
+  delete<T>(path: string) { return this.request<T>('DELETE', path); }
 }
 
 export const api = new ApiClient(BASE_URL);
